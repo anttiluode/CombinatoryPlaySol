@@ -47,7 +47,7 @@ const Play = (function factory(){
    if(o.mode==="recurrent")this.x=mix(b.d,[[old,1-o.feedback-o.anchor],[y,o.feedback],[this.seed,o.anchor]]);
    else if(o.mode==="discrete")this.x=b.x[rows[0].i].slice();
    else this.x=this.seed.slice();
-   if(o.mode!=="static"){for(let i=0;i<this.cover.length;i++)this.cover[i]*=1-o.decay;for(const i of wids)this.cover[i]+=1/o.k;for(const i of wids)this.seen.add(i)}
+   if(o.mode!=="static"){for(let i=0;i<this.cover.length;i++)this.cover[i]*=1-o.decay;for(const i of wids)this.cover[i]+=1/o.k;}for(const i of wids)this.seen.add(i);
    if(o.heat&&o.mode!=="static")this.T=repeat>.6?Math.min(o.temperature*4,this.T*1.35):Math.max(o.temperature,this.T*.90);
    this.tick++;this.active=wids;
    const rec={tick:this.tick,grain:g,temperature:this.T,workspace,unlocked,novel,repeat,coherence:coherence(b,wids),unlockedCoherence:coherence(b,unlocked),cueRetention:dot(this.x,this.seed),stateMotion:1-dot(old,this.x),memory:active.map(z=>({name:z.e.name,keyFit:z.a,tagFit:z.t,weight:z.w})),state:this.x.slice(),query:q,tag:this.tagIds.slice()};
@@ -67,6 +67,18 @@ const Play = (function factory(){
   const p=run(b,cues,{...options,mode:"recurrent",tag:[],memories:[],tagBias:0},ticks);arms["recurrent-no-context"]={summary:summary(p),trace:p.history};
   return arms;
  }
+ function stateIntervention(b,cues,options={},ticks=20){
+  // Two histories, then reset all receiving-machine fields except the injected x.
+  // Both receivers have the same previous workspace and zero coverage.
+  const a=run(b,cues,{...options,mode:"recurrent"},ticks);
+  const c=run(b,cues,{...options,mode:"no-feedback"},ticks);
+  const common={...options,mode:"recurrent",tag:[],memories:[],tagBias:0,coverage:0,heat:false,grain:b.d};
+  const left=new Player(b,cues,common),right=new Player(b,cues,common);
+  const visible=a.active.slice();left.active=visible.slice();right.active=visible.slice();
+  left.setState(a.x);right.setState(c.x);
+  const l=left.step(),r=right.step();
+  return {priorWorkspace:visible,stateCosine:dot(a.x,c.x),nextOverlap:overlap(l.workspace.map(z=>z.i),r.workspace.map(z=>z.i)),left:l,right:r};
+ }
  function selfTest(){
   const b=prepare(demo()),c=ids(b,"bird,shadow,winter"),before=JSON.stringify(b.x),p=new Player(b,c,{k:6,temperature:.1});
   const a=p.step();if(a.workspace.length!==6||Math.abs(a.workspace.reduce((s,z)=>s+z.weight,0)-1)>1e-9)throw Error("parallel workspace");
@@ -80,6 +92,6 @@ const Play = (function factory(){
   const z=experiment(b,c,{k:6},5);if(Object.keys(z).length!==5||Object.values(z).some(a=>a.trace.length!==5))throw Error("matched arms");
   return ["parallel weighted workspace","continuous unsnapped state","static control stable","frozen bank","context-selective episodic gate","state transfer","matched control arms"];
  }
- return {dot,unit,mix,prepare,ids,rank,coherence,overlap,episodes,Player,demo,run,summary,experiment,selfTest,grains};
+ return {dot,unit,mix,prepare,ids,rank,coherence,overlap,episodes,Player,demo,run,summary,experiment,stateIntervention,selfTest,grains};
 })();
 if(typeof module !== 'undefined') module.exports=Play;
