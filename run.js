@@ -11,4 +11,5 @@ const arms=P.experiment(b,cues,opts,ticks);
 if(a["switch-tag"]!==undefined){const p=new P.Player(b,cues,opts),sw=n("switch-at",Math.floor(ticks/2));if(!Number.isInteger(sw)||sw<0||sw>=ticks)throw Error("Invalid switch-at");for(let i=0;i<ticks;i++){if(i===sw)p.setTag(P.ids(b,a["switch-tag"]));p.step()}arms["context-switch"]={summary:P.summary(p),trace:p.history}}
 console.table(Object.entries(arms).map(([arm,v])=>({arm,...v.summary})));
 for(const [arm,v] of Object.entries(arms)){console.log("\n"+arm);for(const r of v.trace.slice(0,12))console.log(r.tick,r.workspace.map(w=>b.words[w.i]).join(", "))}
-const out=a.out||"play-results.json";fs.writeFileSync(out,JSON.stringify({meta:b.meta,words:b.words,cues,options:{...opts,memories:undefined},episodes:raw,arms},null,2));console.log("Wrote",out);
+const intervention=P.stateIntervention(b,cues,opts,ticks);console.log('State intervention: cosine',intervention.stateCosine,'next workspace Jaccard',intervention.nextOverlap);
+const out=a.out||"play-results.json";fs.writeFileSync(out,JSON.stringify({meta:b.meta,words:b.words,cues,options:{...opts,memories:undefined},episodes:raw,arms,intervention},null,2));console.log("Wrote",out);
