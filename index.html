@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>CombinatoryPlaySol</title><style>
+*{box-sizing:border-box}body{margin:0;background:#10171e;color:#e3eaf0;font:14px system-ui}main{max-width:1450px;margin:auto;padding:20px}h1{font-size:30px;margin:0}h2{font-size:16px;margin:0 0 10px}p,small{color:#aab9c5;line-height:1.5}a{color:#9fc5ef}.layout{display:grid;grid-template-columns:320px minmax(0,1fr);gap:12px}.panel{padding:14px;border:1px solid #334453;background:#19242e;border-radius:12px;min-width:0}label{display:block;color:#b8c7d4;margin:12px 0 4px;font-size:12px}input,select,textarea,button{font:inherit;background:#253746;color:inherit;border:1px solid #425a70;border-radius:6px;padding:8px;max-width:100%}input:not([type=file]),select,textarea{width:100%}input[type=range]{padding:0;accent-color:#e4ac68}textarea{resize:vertical;min-height:110px}button{cursor:pointer}button:hover{background:#374f63}.bar{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.stats div{padding:10px;background:#111b24;border-radius:7px}.stats small{display:block}.stats b{font-size:22px;font-variant-numeric:tabular-nums}canvas{display:block;width:100%;height:390px;background:#111b24;border-radius:8px;margin:10px 0}.split{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:12px}table{width:100%;font-size:12px;border-collapse:collapse;text-align:left}th,td{padding:5px;border-bottom:1px solid #31434f}.weight{height:6px;border-radius:3px;background:#e6ad69}.scroll{max-height:300px;overflow:auto}.new{color:#8ed6b4}#log,#memory,#err{white-space:pre-wrap;overflow-wrap:anywhere;font:12px ui-monospace,monospace;line-height:1.6}#err{color:#ffa5a5}#source{color:#e6ad69}.sub{color:#aab9c5;font-size:12px}@media(max-width:850px){.layout,.split{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}}
+</style></head><body><main><h1>CombinatoryPlaySol</h1><p>A continuous internal state, a parallel associative workspace, and a separate contextual memory. No next-token generation in the loop. <a href="https://github.com/anttiluode/SweepSol">SweepSol</a> · <a href="https://github.com/anttiluode/Sweep">Sweep / Unlock</a></p><p id="source"></p><div id="err"></div>
+<div class="layout"><section class="panel"><h2>Reader</h2><label>Load existing bank.json</label><input id="file" type="file" accept=".json"><div class="bar"><button id="toy">Synthetic toy</button></div>
+<label>Initial cues (comma or + separated)</label><input id="cues" value="bird,shadow,winter">
+<label>Persistent context tag (optional)</label><input id="tag" value=""><div class="bar"><button id="retag">Apply tag without resetting state</button></div>
+<label>Mode</label><select id="mode"><option value="recurrent">Continuous recurrent</option><option value="static">Static blend</option><option value="no-feedback">No state feedback (coverage only, plus context)</option><option value="discrete">Discrete top word</option></select>
+<label>Grain</label><select id="grain"></select><label>Workspace size</label><input id="k" type="number" min="2" max="40" value="12">
+<label>Feedback <span id="feedbackv"></span></label><input id="feedback" type="range" min="0" max="80" value="48">
+<label>Cue tether <span id="anchorv"></span></label><input id="anchor" type="range" min="0" max="50" value="18">
+<label>Direct tag bias <span id="tagBiasv"></span></label><input id="tagBias" type="range" min="0" max="100" value="0">
+<label>Memory influence <span id="memoryStrengthv"></span></label><input id="memoryStrength" type="range" min="0" max="100" value="45">
+<label>Base temperature <span id="temperaturev"></span></label><input id="temperature" type="range" min="1" max="50" value="9">
+<label>Coverage penalty <span id="coveragev"></span></label><input id="coverage" type="range" min="0" max="100" value="16">
+<label>Beats / second</label><input id="speed" type="range" min="1" max="12" value="3">
+<label>Optional episodes (JSON: key, tag, value as word strings)</label><textarea id="episodes" spellcheck="false">[]</textarea><div class="bar"><button id="example">Example episodes</button><button id="reset">Reset / apply controls</button></div>
+<div class="bar"><button id="step">Step</button><button id="run">Run</button><button id="save">Export trace</button><button id="test">Self-test</button></div><small>Controls except speed and Apply tag take effect on reset. Feedback + tether cannot exceed 1. Episode data stays in this browser unless you export it. Tags are explicit context vectors, not learned personal identity.</small><p id="testout"></p></section>
+<section class="panel"><div class="stats"><div><small>Beat</small><b id="tick">0</b></div><div><small>Distinct concepts</small><b id="distinct">0</b></div><div><small>New vs cue neighborhoods</small><b id="novel">0</b></div><div><small>Temperature</small><b id="temp">—</b></div></div><canvas id="canvas"></canvas><small>First two normalized cached coordinates only. Gold = continuous state, white = initial cue blend, blue = weighted workspace observations. Distances and intersections in this projection can be misleading.</small>
+<div class="split"><div><h2>Parallel workspace</h2><div class="scroll"><table><thead><tr><th>Concept</th><th>Weight</th><th>Cosine</th></tr></thead><tbody id="ws"></tbody></table></div><small>Green words are outside every initial cue's individual full-space top-k neighborhood. They already exist in the frozen bank.</small></div><div><h2>Active episodes</h2><div id="memory"></div><h2 style="margin-top:14px">Dynamics</h2><div id="metrics"></div></div></div><h2 style="margin-top:14px">Unfolding trace</h2><div id="log" class="scroll"></div></section></div></main>
+<script src="play.js"></script><script>
+"use strict";
+const $=i=>document.getElementById(i);let b,p,timer=null,range,rawEpisodes=[];
+function stop(){if(timer!==null)clearTimeout(timer);timer=null;$("run").textContent="Run"}
+function safe(fn){return (...a)=>{try{$("err").textContent="";fn(...a)}catch(e){stop();$("err").textContent=e.message||String(e)}}}
+const val=id=>Number($(id).value)/100;
+function reset(){stop();rawEpisodes=JSON.parse($("episodes").value);const g=$("grain").value;
+ p=new Play.Player(b,Play.ids(b,$("cues").value),{tag:Play.ids(b,$("tag").value),memories:Play.episodes(b,rawEpisodes),mode:$("mode").value,grain:g==="cycle"?g:Number(g),k:Number($("k").value),feedback:val("feedback"),anchor:val("anchor"),tagBias:val("tagBias"),memoryStrength:val("memoryStrength"),temperature:val("temperature"),coverage:val("coverage")});draw()}
+function load(raw){stop();b=Play.prepare(raw);$("source").textContent=(b.meta.source||"Imported bank")+" · "+b.words.length+" words · "+b.d+" cached dimensions · layer "+(b.meta.layer??"n/a");$("grain").replaceChildren(...Play.grains(b).map(g=>new Option(g===b.d?"All "+g+" cached dimensions":"PC 1–"+g,String(g))),new Option("Cycle grains","cycle"));$("grain").value=String(b.d);if(!$("cues").value.split(/[,+]/).every(w=>b.index.has(w.trim())))$("cues").value=b.words.slice(0,3).join(",");$("tag").value="";$("episodes").value="[]";
+ range=[0,1].map(j=>{let lo=Infinity,hi=-Infinity;for(const x of b.x){lo=Math.min(lo,x[j]);hi=Math.max(hi,x[j])}return [lo,hi]});reset()}
+function draw(){
+ const r=p.history.at(-1),hist=p.history,distinct=new Set(hist.flatMap(x=>x.workspace.map(w=>w.i))),nov=new Set(hist.flatMap(x=>x.unlocked));
+ $("tick").textContent=p.tick;$("distinct").textContent=distinct.size;$("novel").textContent=nov.size;$("temp").textContent=p.T.toFixed(3);
+ $("ws").replaceChildren(...(r?.workspace||[]).map(w=>{const tr=document.createElement("tr");let td=document.createElement("td");td.textContent=b.words[w.i];if(r.unlocked.includes(w.i))td.className="new";tr.append(td);td=document.createElement("td");const bar=document.createElement("div");bar.className="weight";bar.style.width=(w.weight*100)+"%";td.append(document.createTextNode(w.weight.toFixed(3)),bar);tr.append(td);td=document.createElement("td");td.textContent=w.sim.toFixed(3);tr.append(td);return tr}));
+ $("memory").textContent=r?.memory.map(m=>m.name+" · key "+m.keyFit.toFixed(2)+" · tag "+m.tagFit.toFixed(2)).join("\n")||"None";
+ $("metrics").textContent=r?"Cue retention "+r.cueRetention.toFixed(3)+" · coherence "+(r.coherence??0).toFixed(3)+" · overlap "+r.repeat.toFixed(3)+" · state motion "+r.stateMotion.toFixed(5):"Step to observe";
+ $("log").textContent=hist.slice(-35).reverse().map(x=>"#"+x.tick+" PC"+x.grain+" | "+x.workspace.map(w=>b.words[w.i]).join(", ")+" | "+x.memory.map(m=>m.name).join("; ")).join("\n");
+ const cv=$("canvas"),rect=cv.getBoundingClientRect(),dpr=devicePixelRatio||1;cv.width=Math.max(1,Math.round(rect.width*dpr));cv.height=Math.max(1,Math.round(rect.height*dpr));const g=cv.getContext("2d");g.scale(dpr,dpr);const W=rect.width,H=rect.height;
+ const xy=v=>[15+(W-30)*(v[0]-range[0][0])/(range[0][1]-range[0][0]||1),H-15-(H-30)*(v[1]-range[1][0])/(range[1][1]-range[1][0]||1)];
+ function point(v,color,size,label){const [x,y]=xy(v);g.fillStyle=color;g.beginPath();g.arc(x,y,size,0,Math.PI*2);g.fill();if(label){g.font="11px system-ui";g.fillText(label,x+7,y-5)}}
+ function line(a,b,color,width){const [x,y]=xy(a),[u,v]=xy(b);g.strokeStyle=color;g.lineWidth=width;g.beginPath();g.moveTo(x,y);g.lineTo(u,v);g.stroke()}
+ g.fillStyle="#91a6b42a";for(const v of b.x){const [x,y]=xy(v);g.fillRect(x,y,1.5,1.5)}
+ const path=[p.seed,...hist.slice(-60).map(x=>x.state)];for(let i=1;i<path.length;i++)line(path[i-1],path[i],"#e6ad69a0",2);
+ for(const w of r?.workspace||[]){line(r.query,b.x[w.i],"#78b3dc50",.5+w.weight*4);point(b.x[w.i],r.unlocked.includes(w.i)?"#8ed6b4":"#78b3dc",3+w.weight*15,b.words[w.i])}
+ point(p.seed,"#f0f3f5",4,"cue blend");point(p.x,"#e6ad69",7,"internal state");
+}
+function tick(){p.step();draw()}
+function loop(){try{tick();timer=setTimeout(loop,1000/Number($("speed").value))}catch(e){stop();$("err").textContent=e.message}}
+$("file").onchange=async e=>{try{if(e.target.files[0])load(JSON.parse(await e.target.files[0].text()))}catch(e){$("err").textContent=e.message}};
+$("toy").onclick=safe(()=>load(Play.demo()));$("reset").onclick=safe(reset);$("step").onclick=safe(()=>{stop();tick()});$("run").onclick=safe(()=>{if(timer!==null)stop();else{$("run").textContent="Pause";loop()}});
+$("retag").onclick=safe(()=>{p.setTag(Play.ids(b,$("tag").value));draw()});
+$("example").onclick=safe(()=>{$("episodes").value=JSON.stringify([{name:"Music context",key:"bird,shadow",tag:"music",value:"song,guitar"},{name:"Home context",key:"bird,shadow",tag:"family",value:"home,photo"}],null,2);$("tag").value="music";reset()});
+$("test").onclick=safe(()=>{$("testout").textContent=Play.selfTest().join(" · ")});
+$("save").onclick=safe(()=>{const data={meta:b.meta,words:b.words,cues:p.cues,options:p.opts,episodes:rawEpisodes,trace:p.history};const url=URL.createObjectURL(new Blob([JSON.stringify(data)],{type:"application/json"})),a=document.createElement("a");a.href=url;a.download="play-trace.json";a.click();setTimeout(()=>URL.revokeObjectURL(url),1000)});
+for(const id of ["feedback","anchor","tagBias","memoryStrength","temperature","coverage"]){const f=()=>$(id+"v").textContent=val(id).toFixed(2);$(id).oninput=f;f()}
+window.addEventListener("resize",()=>{if(p)draw()});load(Play.demo());
+</script></body></html>
