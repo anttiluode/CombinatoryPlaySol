@@ -54,3 +54,20 @@ Generates literal continuations and prompted associations using the same cue wor
 Seven synthetic wiring checks passed: weighted parallel workspace, unsnapped state, static stability, frozen bank, context-selective episode activation, state transfer and matched arms. On the deliberately hand-designed toy, 20 beats with k=8 gave 8 distinct observations (static), 13 (no-feedback), 13 (discrete) and 15 (recurrent). Same-prior-workspace state intervention gave state cosine 0.9224 and next-workspace Jaccard 0.7778. These are toy outcomes, not real Qwen results. Browser inline and CLI syntax parsed; browser end-to-end, Python comparison and real-bank behavior were not executed here.
 
 The main question is whether recurrent feedback over multiple concurrent associations contributes useful structure beyond static blending and coverage, not whether an external reader can produce different words from a language model.
+
+
+## Recoverable energy / fatigue (real-bank trap report)
+
+The first user Qwen trace (bird,shadow,winter, 516 beats, k=12, full cached grain) visited 79 distinct words; the last new word occurred at beat 91. For beats 280–516 only 25 distinct addresses were visited, with mean consecutive workspace Jaccard 0.889 and mean state motion 1-cosine 0.00168. The last 12 words were cow, bat, bull, crow, fly, horse, bear, dog, cat, rat, mouse, bug. Temperature was at its cap (0.36). Heating only changes weights **after** top-k selection, so it cannot directly admit new words. Original coverage adds 1/k per selected word and decays by 0.10; its maximum steady penalty at the default settings is 0.16/(12*0.10) = 0.1333.
+
+New optional fatigue acts **before** selection. Each bank address starts with energy E=1. Selection score is old score minus fatigueStrength*(1-E). After reading, active addresses consume energy, and unselected addresses can also consume energy proportionally to positive full-space cosine to the weighted workspace centroid above the spread threshold. Energy recovers by recovery*(1-E) per beat, while burning burn*demand; E is clipped to [0,1]. Spread=1 means strict address-only fatigue. This is a computational adaptation analogy, not a model of neuronal ATP depletion.
+
+Browser: set Fatigue strength to 1.00, Burn 0.12, Recovery 0.015, Spread 0.55 and Reset. The default fatigue strength is 0 so previous behavior is preserved. Watch active energy and distinct concepts. Compare the same run with spread=1 or fatigue=0. The CLI has a matched three-arm comparison:
+
+```bat
+node run.js --bank ..\SweepSol\bank.json --cues bird,shadow,winter --ticks 516 --fatigue-test 1 --out play-fatigue.json
+```
+
+All arms retain the same coverage, temperature, cue tether and feedback. The arms are baseline, address-only, and regional fatigue. Report last novel beat, distinct words, coherence, retention, overlap and motion together. Fatigue is not a guarantee of continual meaningful novelty; finite banks saturate and moving further can lose relevance.
+
+Final committed JavaScript synthetic checks passed, including depletion, regional spread, recovery and disabled regression. With the toy bank (300 beats, k=8), baseline observed 15 distinct words (mean coherence 0.836), address-only 45 (0.705), regional 45 (0.716). Both fatigue arms visited all 45 eligible words, so novelty saturates on this toy, and regional spread did not improve distinct count over address-only. Real Qwen fatigue performance and browser end-to-end behavior remain untested here. No user trace or private memories were committed.
