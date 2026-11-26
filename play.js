@@ -25,10 +25,10 @@ const Play = (function factory(){
  function overlap(a,b){const x=new Set(a),y=new Set(b);let n=0;for(const i of x)if(y.has(i))n++;return n/(new Set([...x,...y]).size||1)}
  function episodes(b,raw){return raw.map((e,j)=>{let k=ids(b,e.key),t=ids(b,e.tag),v=ids(b,e.value);if(!k.length||!t.length||!v.length)throw Error("Episode "+j+" needs key, tag and value");return {name:e.name||"episode "+j,key:mean(b,k),tag:mean(b,t),value:mean(b,v),keyIds:k,tagIds:t,valueIds:v}})}
  class Player{
-  constructor(b,cues,{tag=[],memories=[],mode="recurrent",grain=b.d,k=12,feedback=.48,anchor=.18,tagBias=0,memoryStrength=.45,temperature=.09,coverage=.16,decay=.10,heat=true,threshold=.2}={}){
+  constructor(b,cues,{tag=[],memories=[],mode="recurrent",grain=b.d,k=12,feedback=.48,anchor=.18,tagBias=0,memoryStrength=.45,temperature=.09,coverage=.16,decay=.10,heat=true,threshold=.2,fatigue=0,burn=.12,recovery=.015,spread=.55}={}){
    if(!cues.length||cues.length>=b.words.length)throw Error("Need at least one cue and remaining bank words");
-   if(!["recurrent","static","no-feedback","discrete"].includes(mode)||!Number.isInteger(k)||k<1||![feedback,anchor,tagBias,memoryStrength,coverage,decay,threshold].every(x=>Number.isFinite(x)&&x>=0&&x<=1)||feedback+anchor>1||!Number.isFinite(temperature)||temperature<=0||!b.views.has(grain)&&grain!=="cycle")throw Error("Invalid player options");
-   this.b=b;this.cues=cues.slice();this.seed=mean(b,cues);this.x=this.seed.slice();this.tag=tag.length?mean(b,tag):Array(b.d).fill(0);this.tagIds=tag.slice();this.memories=memories;this.opts={mode,grain,k,feedback,anchor,tagBias,memoryStrength,temperature,coverage,decay,heat,threshold};this.T=temperature;this.cover=new Float64Array(b.words.length);this.history=[];this.seen=new Set();this.tick=0;this.exclude=new Set(cues);this.active=[];this.baseline=new Set(cues.flatMap(i=>rank(b,b.x[i],k,b.d,new Set([i])).map(z=>z.i)));
+   if(!["recurrent","static","no-feedback","discrete"].includes(mode)||!Number.isInteger(k)||k<1||![feedback,anchor,tagBias,memoryStrength,coverage,decay,threshold].every(x=>Number.isFinite(x)&&x>=0&&x<=1)||feedback+anchor>1||!Number.isFinite(fatigue)||fatigue<0||fatigue>4||![burn,recovery,spread].every(x=>Number.isFinite(x)&&x>=0&&x<=1)||!Number.isFinite(temperature)||temperature<=0||!b.views.has(grain)&&grain!=="cycle")throw Error("Invalid player options");
+   this.b=b;this.cues=cues.slice();this.seed=mean(b,cues);this.x=this.seed.slice();this.tag=tag.length?mean(b,tag):Array(b.d).fill(0);this.tagIds=tag.slice();this.memories=memories;this.opts={mode,grain,k,feedback,anchor,tagBias,memoryStrength,temperature,coverage,decay,heat,threshold,fatigue,burn,recovery,spread};this.T=temperature;this.cover=new Float64Array(b.words.length);this.energy=new Float64Array(b.words.length).fill(1);this.history=[];this.seen=new Set();this.tick=0;this.exclude=new Set(cues);this.active=[];this.baseline=new Set(cues.flatMap(i=>rank(b,b.x[i],k,b.d,new Set([i])).map(z=>z.i)));
   }
   setTag(tag){this.tagIds=tag.slice();this.tag=tag.length?mean(this.b,tag):Array(this.b.d).fill(0)}
   setState(v){if(v.length!==this.b.d||v.some(x=>!Number.isFinite(x)))throw Error("Bad state");this.x=unit(v)}
@@ -37,20 +37,33 @@ const Play = (function factory(){
    const active=o.mode==="static"||!this.tagIds.length?[]:this.memories.map(e=>{const a=dot(old,e.key),t=dot(this.tag,e.tag);return {e,a,t,w:a>=o.threshold&&t>=o.threshold?a*t:0}}).filter(z=>z.w>0);
    const m=active.length?mix(b.d,active.map(z=>[z.e.value,z.w])):Array(b.d).fill(0);
    const q=o.mode==="static"?this.seed:mix(b.d,[[old,1],[this.tag,o.tagBias],[m,o.memoryStrength]]);
-   const pen=o.mode==="static"?null:Array.from(this.cover,z=>o.coverage*z);
+   const pen=o.mode==="static"?null:Array.from(this.cover,(z,i)=>o.coverage*z+o.fatigue*(1-this.energy[i]));
    const rows=rank(b,q,o.k,g,this.exclude,pen);if(!rows.length)throw Error("No workspace candidates");
    const max=rows[0].score,ww=rows.map(z=>Math.exp((z.score-max)/this.T)),sum=ww.reduce((a,b)=>a+b,0);
    const workspace=rows.map((z,i)=>({...z,weight:ww[i]/sum})),wids=rows.map(z=>z.i);
    const prev=this.active,repeat=prev.length?overlap(prev,wids):0,novel=wids.filter(i=>!this.seen.has(i)).length;
    const unlocked=wids.filter(i=>!this.baseline.has(i));
    const y=mix(b.d,workspace.map(z=>[b.x[z.i],z.weight]));
+   // Each address has a recoverable resource. A whole active region consumes it,
+   // including similar unselected words; no random jump or goal is imposed.
+   let activeEnergy=null,meanEnergy=null;
+   if(o.fatigue>0&&o.mode!=="static"){
+    activeEnergy=wids.reduce((a,i)=>a+this.energy[i],0)/wids.length;
+    const selected=new Set(wids);let total=0;
+    for(let i=0;i<b.words.length;i++){
+     const local=Math.max(0,(dot(b.x[i],y)-o.spread)/Math.max(1e-9,1-o.spread));
+     const demand=selected.has(i)?1:local;
+     this.energy[i]=Math.max(0,Math.min(1,this.energy[i]+o.recovery*(1-this.energy[i])-o.burn*demand));total+=this.energy[i];
+    }
+    meanEnergy=total/b.words.length;
+   }
    if(o.mode==="recurrent")this.x=mix(b.d,[[old,1-o.feedback-o.anchor],[y,o.feedback],[this.seed,o.anchor]]);
    else if(o.mode==="discrete")this.x=b.x[rows[0].i].slice();
    else this.x=this.seed.slice();
    if(o.mode!=="static"){for(let i=0;i<this.cover.length;i++)this.cover[i]*=1-o.decay;for(const i of wids)this.cover[i]+=1/o.k;}for(const i of wids)this.seen.add(i);
    if(o.heat&&o.mode!=="static")this.T=repeat>.6?Math.min(o.temperature*4,this.T*1.35):Math.max(o.temperature,this.T*.90);
    this.tick++;this.active=wids;
-   const rec={tick:this.tick,grain:g,temperature:this.T,workspace,unlocked,novel,repeat,coherence:coherence(b,wids),unlockedCoherence:coherence(b,unlocked),cueRetention:dot(this.x,this.seed),stateMotion:1-dot(old,this.x),memory:active.map(z=>({name:z.e.name,keyFit:z.a,tagFit:z.t,weight:z.w})),state:this.x.slice(),query:q,tag:this.tagIds.slice()};
+   const rec={tick:this.tick,grain:g,temperature:this.T,workspace,unlocked,novel,repeat,coherence:coherence(b,wids),unlockedCoherence:coherence(b,unlocked),cueRetention:dot(this.x,this.seed),stateMotion:1-dot(old,this.x),activeEnergy,meanEnergy,memory:active.map(z=>({name:z.e.name,keyFit:z.a,tagFit:z.t,weight:z.w})),state:this.x.slice(),query:q,tag:this.tagIds.slice()};
    this.history.push(rec);return rec;
   }
  }
@@ -61,7 +74,8 @@ const Play = (function factory(){
   return {words,vectors,meta:{source:"Synthetic toy, not Qwen",pcs:12}};
  }
  function run(b,cues,options={},ticks=30){const p=new Player(b,cues,options);for(let i=0;i<ticks;i++)p.step();return p}
- function summary(p){const h=p.history,all=new Set(h.flatMap(r=>r.workspace.map(z=>z.i))),newSet=new Set(h.flatMap(r=>r.unlocked)),avg=k=>h.reduce((a,r)=>a+(r[k]??0),0)/h.length;return {ticks:h.length,distinct:all.size,unlockedDistinct:newSet.size,meanCoherence:avg("coherence"),meanCueRetention:avg("cueRetention"),meanRepeat:avg("repeat"),meanStateMotion:avg("stateMotion"),memoryActiveTicks:h.filter(r=>r.memory.length).length}}
+ const oAvg=(h,k)=>{const a=h.map(r=>r[k]).filter(x=>x!==null&&x!==undefined);return a.length?a.reduce((s,x)=>s+x,0)/a.length:null};
+ function summary(p){const h=p.history,all=new Set(h.flatMap(r=>r.workspace.map(z=>z.i))),newSet=new Set(h.flatMap(r=>r.unlocked)),avg=k=>h.reduce((a,r)=>a+(r[k]??0),0)/h.length;return {ticks:h.length,distinct:all.size,unlockedDistinct:newSet.size,meanCoherence:avg("coherence"),meanCueRetention:avg("cueRetention"),meanRepeat:avg("repeat"),meanStateMotion:avg("stateMotion"),memoryActiveTicks:h.filter(r=>r.memory.length).length,lastNovelBeat:h.filter(r=>r.novel>0).at(-1)?.tick??0,meanActiveEnergy:oAvg(h,"activeEnergy")}}
  function experiment(b,cues,options={},ticks=30){
   const arms={};for(const mode of ["static","no-feedback","discrete","recurrent"]){const p=run(b,cues,{...options,mode},ticks);arms[mode]={summary:summary(p),trace:p.history}}
   const p=run(b,cues,{...options,mode:"recurrent",tag:[],memories:[],tagBias:0},ticks);arms["recurrent-no-context"]={summary:summary(p),trace:p.history};
@@ -72,12 +86,17 @@ const Play = (function factory(){
   // Both receivers have the same previous workspace and zero coverage.
   const a=run(b,cues,{...options,mode:"recurrent"},ticks);
   const c=run(b,cues,{...options,mode:"no-feedback"},ticks);
-  const common={...options,mode:"recurrent",tag:[],memories:[],tagBias:0,coverage:0,heat:false,grain:b.d};
+  const common={...options,mode:"recurrent",tag:[],memories:[],tagBias:0,coverage:0,fatigue:0,heat:false,grain:b.d};
   const left=new Player(b,cues,common),right=new Player(b,cues,common);
   const visible=a.active.slice();left.active=visible.slice();right.active=visible.slice();
   left.setState(a.x);right.setState(c.x);
   const l=left.step(),r=right.step();
   return {priorWorkspace:visible,stateCosine:dot(a.x,c.x),nextOverlap:overlap(l.workspace.map(z=>z.i),r.workspace.map(z=>z.i)),left:l,right:r};
+ }
+ function fatigueComparison(b,cues,options={},ticks=300){
+  const arms={};for(const [name,fatigue,spread] of [["baseline",0,.55],["address-only",options.fatigue||1,.55],["regional",options.fatigue||1,options.spread??.55]]){
+   const p=run(b,cues,{...options,mode:"recurrent",fatigue,spread:name==="address-only"?1:spread},ticks);arms[name]={summary:summary(p),trace:p.history};
+  }return arms;
  }
  function selfTest(){
   const b=prepare(demo()),c=ids(b,"bird,shadow,winter"),before=JSON.stringify(b.x),p=new Player(b,c,{k:6,temperature:.1});
@@ -90,8 +109,12 @@ const Play = (function factory(){
   const x=p1.step(),y=p2.step();if(x.memory[0]?.name!=="episode 0"||y.memory[0]?.name!=="episode 1"||dot(x.query,y.query)>1-1e-8)throw Error("context gate");
   const same=new Player(b,c,{k:6});same.active=p.active.slice();same.setState(p.x);if(dot(same.x,p.x)<1-1e-9)throw Error("state transfer");
   const z=experiment(b,c,{k:6},5);if(Object.keys(z).length!==5||Object.values(z).some(a=>a.trace.length!==5))throw Error("matched arms");
-  return ["parallel weighted workspace","continuous unsnapped state","static control stable","frozen bank","context-selective episodic gate","state transfer","matched control arms"];
+  const f=new Player(b,c,{k:6,fatigue:1,burn:.2,recovery:.05,spread:.3});const fr=f.step();if(fr.activeEnergy!==1||!fr.workspace.every(z=>f.energy[z.i]<1)||!f.energy.every(z=>z>=0&&z<=1))throw Error("fatigue depletion");
+  if(!f.energy.some((v,i)=>!f.active.includes(i)&&v<1))throw Error("regional spread");
+  const recover=new Player(b,c,{k:6,fatigue:1,burn:0,recovery:.1});recover.energy.fill(.2);recover.step();if(!recover.energy.every(e=>Math.abs(e-.28)<1e-9))throw Error("resource recovery");
+  const off=run(b,c,{k:6,fatigue:0},8),orig=run(b,c,{k:6},8);if(JSON.stringify(off.history)!==JSON.stringify(orig.history))throw Error("fatigue off regression");
+  return ["recoverable fatigue, regional spread and disabled regression","parallel weighted workspace","continuous unsnapped state","static control stable","frozen bank","context-selective episodic gate","state transfer","matched control arms"];
  }
- return {dot,unit,mix,prepare,ids,rank,coherence,overlap,episodes,Player,demo,run,summary,experiment,stateIntervention,selfTest,grains};
+ return {dot,unit,mix,prepare,ids,rank,coherence,overlap,episodes,Player,demo,run,summary,experiment,stateIntervention,fatigueComparison,selfTest,grains};
 })();
 if(typeof module !== 'undefined') module.exports=Play;
