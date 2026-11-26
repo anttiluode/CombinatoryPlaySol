@@ -51,7 +51,7 @@ const Play = (function factory(){
     activeEnergy=wids.reduce((a,i)=>a+this.energy[i],0)/wids.length;
     const selected=new Set(wids);let total=0;
     for(let i=0;i<b.words.length;i++){
-     const local=Math.max(0,(dot(b.x[i],y)-o.spread)/Math.max(1e-9,1-o.spread));
+     const local=o.spread===1?0:Math.min(1,Math.max(0,(dot(b.x[i],y)-o.spread)/(1-o.spread)));
      const demand=selected.has(i)?1:local;
      this.energy[i]=Math.max(0,Math.min(1,this.energy[i]+o.recovery*(1-this.energy[i])-o.burn*demand));total+=this.energy[i];
     }
@@ -94,7 +94,7 @@ const Play = (function factory(){
   return {priorWorkspace:visible,stateCosine:dot(a.x,c.x),nextOverlap:overlap(l.workspace.map(z=>z.i),r.workspace.map(z=>z.i)),left:l,right:r};
  }
  function fatigueComparison(b,cues,options={},ticks=300){
-  const arms={};for(const [name,fatigue,spread] of [["baseline",0,.55],["address-only",options.fatigue||1,.55],["regional",options.fatigue||1,options.spread??.55]]){
+  const arms={};for(const [name,fatigue,spread] of [["baseline",0,.55],["address-only",options.fatigue??1,.55],["regional",options.fatigue??1,options.spread??.55]]){
    const p=run(b,cues,{...options,mode:"recurrent",fatigue,spread:name==="address-only"?1:spread},ticks);arms[name]={summary:summary(p),trace:p.history};
   }return arms;
  }
