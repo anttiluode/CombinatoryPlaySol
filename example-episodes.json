@@ -1,0 +1,14 @@
+[
+  {
+    "name": "Music context",
+    "key": "bird,shadow",
+    "tag": "music",
+    "value": "song,guitar"
+  },
+  {
+    "name": "Home context",
+    "key": "bird,shadow",
+    "tag": "family",
+    "value": "home,photo"
+  }
+]
